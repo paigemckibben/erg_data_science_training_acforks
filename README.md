@@ -1,1 +1,7 @@
-# erg_data_science_trainings
+# ERG Data Science Trainings
+
+##### Repository to house scripts used in trainings for the ERG Data Science Group.
+</br>
+
+#### **Training Materials:**
+`intro_machine_learning/`: Training by Daniel McGeeney on 2022-07-28 
