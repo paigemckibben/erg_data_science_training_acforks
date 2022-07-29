@@ -1,3 +1,5 @@
+### Presentation Key####
+
 # ========================= #
 # == Prepare environment == #
 # ========================= #
@@ -55,7 +57,7 @@ penguin_df <- penguins %>%
 # ============================================= #
 
 # Set the random seed for reproducibility
-set.seed(123)
+set.seed(1234)
 
 # Split the observations into train & test sets
 penguin_split  <- initial_split(penguin_df, prop=0.75)
@@ -114,7 +116,7 @@ logistic_workflow <- workflow() %>%
   add_model(logistic_spec)
 
 # Train the models on the training data
-set.seed(234)
+set.seed(2345)
 rf_model       <- fit(rf_workflow, penguin_train)
 knn_model      <- fit(knn_workflow, penguin_train)
 xgb_model      <- fit(xgb_workflow, penguin_train)
@@ -127,20 +129,16 @@ xgb_predict <- predict(xgb_model, penguin_test)
 logistic_predict <- predict(logistic_model, penguin_test)
 
 # Get an unbiased estimate of model accuracy by evaluating the test set predictions
-rf_predict %>% 
-  bind_cols(penguin_test) %>% 
+bind_cols(rf_predict, penguin_test) %>% 
   metrics(truth = sex, estimate = .pred_class)
 
-knn_predict %>% 
-  bind_cols(penguin_test) %>% 
+bind_cols(knn_predict, penguin_test) %>% 
   metrics(truth = sex, estimate = .pred_class)
 
-xgb_predict %>% 
-  bind_cols(penguin_test) %>% 
+bind_cols(xgb_predict, penguin_test) %>% 
   metrics(truth = sex, estimate = .pred_class)
 
-logistic_predict %>% 
-  bind_cols(penguin_test) %>% 
+bind_cols(logistic_predict, penguin_test) %>% 
   metrics(truth = sex, estimate = .pred_class)
 
 
@@ -169,7 +167,7 @@ rf_workflow.v2 <- workflow() %>%
   add_model(rf_spec_with_tuning)
 
 # 4. Store the hyperparameter search space (a search "grid")
-rf_grid <- expand.grid(mtry  = c(3, 5),
+rf_grid <- expand.grid(mtry  = c(2, 4),
                        trees = c(100, 500),
                        min_n = c(10))
 
@@ -193,12 +191,12 @@ rf_workflow.v2 <- rf_workflow.v2 %>%
 rf_fit <- fit(rf_workflow.v2, penguin_train)
 
 # 9. Evaluate the confusion matrix
-training_preds %>% 
-  bind_cols(penguin_train) %>% 
+training_preds <- predict(rf_fit, penguin_train)
+
+bind_cols(training_preds, penguin_train) %>% 
   conf_mat(truth = sex, estimate = .pred_class)
 
 # 10. Look for patterns in the incorrect predictions
-training_preds <- predict(rf_fit, penguin_train)
 cbind(penguin_train, training_preds) %>% 
   filter(sex!=.pred_class)
 
@@ -206,8 +204,7 @@ cbind(penguin_train, training_preds) %>%
 rf_test_preds2 <- predict(rf_fit, penguin_test)
 
 # 12. Evaluate the model's accuracy on the test set
-rf_test_preds2 %>% 
-  bind_cols(penguin_test) %>% 
+bind_cols(penguin_test, rf_test_preds2) %>% 
   metrics(truth = sex, estimate = .pred_class)
 
 
