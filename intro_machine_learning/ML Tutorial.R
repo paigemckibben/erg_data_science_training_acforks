@@ -1,4 +1,6 @@
-### Presentation Key####
+# Skip to line 57 for the simpler example.
+# Skip to line 186 for the more complex example (hyperparameter tuning & more robust model evaluation).
+
 
 # ========================= #
 # == Prepare environment == #
@@ -57,7 +59,7 @@ penguin_df <- penguins %>%
 # ============================================= #
 
 # Set the random seed for reproducibility
-set.seed(1234)
+set.seed(123)
 
 # Split the observations into train & test sets
 penguin_split  <- initial_split(penguin_df, prop=0.75)
@@ -93,7 +95,7 @@ logistic_spec <-
 # Define the recipes (formula & preprocessing steps)
 penguins_recipe <- 
   recipe(sex ~ species + bill_length_mm + bill_depth_mm + flipper_length_mm + body_mass_g, 
-         data = penguin_df) %>%
+         data = penguin_train) %>%
   step_normalize(all_numeric()) %>%             # this isn't really necessary for RFs
   step_impute_knn(all_predictors()) %>%         # again, not needed for RFs
   step_dummy(all_nominal(), -all_outcomes())    # likewise here, only needed for the other models
@@ -116,7 +118,7 @@ logistic_workflow <- workflow() %>%
   add_model(logistic_spec)
 
 # Train the models on the training data
-set.seed(2345)
+set.seed(234)
 rf_model       <- fit(rf_workflow, penguin_train)
 knn_model      <- fit(knn_workflow, penguin_train)
 xgb_model      <- fit(xgb_workflow, penguin_train)
@@ -132,81 +134,260 @@ logistic_predict <- predict(logistic_model, penguin_test)
 bind_cols(rf_predict, penguin_test) %>% 
   metrics(truth = sex, estimate = .pred_class)
 
-bind_cols(knn_predict, penguin_test) %>% 
+knn_predict %>% 
+  bind_cols(penguin_test) %>% 
   metrics(truth = sex, estimate = .pred_class)
 
-bind_cols(xgb_predict, penguin_test) %>% 
+xgb_predict %>% 
+  bind_cols(penguin_test) %>% 
   metrics(truth = sex, estimate = .pred_class)
 
-bind_cols(logistic_predict, penguin_test) %>% 
+logistic_predict %>% 
+  bind_cols(penguin_test) %>% 
   metrics(truth = sex, estimate = .pred_class)
 
+# ====================================== #
+# == Overview of Tidymodels Functions == #
+# ====================================== #
+
+# Functions we saw in the simple model
+data_split <- initial_split(full_dataset)
+training_df <- training(data_split)
+testing_df <- testing(data_split)
+
+model_specification <- 
+  rand_forest() %>%                     # choose our ML algorithm
+  set_engine("ranger") %>%              # choose a specific R package
+  set_mode("classification")            # either classification or regression
+
+model_recipe <- recipe(y ~ x formula, data = dataframe_template)
+
+wf_object <- workflow() %>% 
+  add_recipe(model_recipe) %>% 
+  add_model(model_specification)
+
+fitted_model <- fit(wf_object, training_data)
+predctions <- predict(fitted_model, test_data)
+metrics(truth = actual_y_variable, estimate = predicted_y_variable)
+
+
+# New functions
+vfold_cv(training_df)
+expand.grid(list_of_hyperparameters_to_tune_and_their_possible_values)
+tune_results <- tune_grid(...)
+finalize_workflow(old_workflow, final_tuned_hyperparameters)
+collect_metrics(tune_results)
+select_best(tune_results)
+collect_predictions(tune_results) 
+conf_mat_resampled(tune_results)
+conf_mat(predictions_object)
 
 
 # =========================================== #
 # == Complex Model (Hyperparameter Tuning) == #
 # =========================================== #
+# Clear the environment
+remove(list=ls())
+
+# Load the packages from last time
+library(tidyverse)
+library(tidymodels)
+library(palmerpenguins)
+library(kknn)
+library(xgboost)
+library(ranger)
+
+# Add a couple additional packages
+install.packages(c('vip','gridExtra'))
+library(vip)        # for extracting variable importance
+library(gridExtra)  # for visualizing multiple ggplots at once
 
 
-# 1. Create a cross-validation set from the training data
-penguin_cv <- vfold_cv(penguin_train)
+# 1. Feature selection: choose the variables we want to include, 
+#    and remove observations with missing outcome variable
+penguin_df <- penguins %>% 
+  filter(!is.na(sex)) %>% 
+  select(-year, -island)
 
-# 2. Store the model specification
+# 2. Split the observations into train & test sets
+set.seed(123)     # Set the random seed for reproducibility
+penguin_split  <- initial_split(penguin_df, prop=0.75)
+penguin_train  <- training(penguin_split)
+penguin_test   <- testing(penguin_split)
+
+# 3. Create a cross-validation set from the training data
+set.seed(1357)
+penguin_cv <- vfold_cv(penguin_train, v=10, repeats=1)
+
+# If there's class imbalance (eg, far more females than males), stratifying by the outcome variable can be important
+penguin_train$sex %>% table
+penguin_cv <- vfold_cv(penguin_train, strata=sex, v=10, repeats=1)
+
+# To see the 1st fold:
+penguin_cv$splits[1] %>% data.frame
+
+# 4. Set a workflow (specify the model, define a recipe, and combine)
 rf_spec_with_tuning <- 
-  rand_forest() %>%
-  set_args(trees=tune(),
-           mtry=tune(),
-           min_n=tune()) %>% 
+  rand_forest(
+    trees=500,
+    mtry=tune(),
+    min_n=tune()) %>%
   set_engine("ranger", 
              importance="impurity") %>% 
   set_mode("classification") 
 
-# 3. Set a workflow (using the previous recipe)
+penguins_recipe <- 
+  recipe(sex ~ species + bill_length_mm + bill_depth_mm + flipper_length_mm + body_mass_g, 
+         data = penguin_train)
+#step_normalize() %>%
+#step_impute_knn(all_predictors()) %>%
+#step_dummy(all_nominal(), -all_outcomes())
+
 rf_workflow.v2 <- workflow() %>% 
   add_recipe(penguins_recipe) %>% 
   add_model(rf_spec_with_tuning)
 
-# 4. Store the hyperparameter search space (a search "grid")
-rf_grid <- expand.grid(mtry  = c(2, 4),
-                       trees = c(100, 500),
-                       min_n = c(10))
+# 5. Store the hyperparameter search space (a search "grid")
+rf_grid <- expand.grid(mtry  = c(3, 4, 5),
+                       min_n = c(5, 10))
 
-# 5. Find the tuned hyperparameters using cross-validation 
-rf_tune_results <- rf_workflow.v2 %>% 
-  tune_grid(resamples = penguin_cv,
-            grid = rf_grid,
-            metrics = metric_set(accuracy, roc_auc))
+# 6. Find the tuned hyperparameters using cross-validation 
+set.seed(123456)
+rf_tune_results <- 
+  tune_grid(object    = rf_workflow.v2,
+            resamples = penguin_cv,
+            grid      = rf_grid,
+            metrics   = metric_set(accuracy, roc_auc),
+            control   = control_grid(save_pred = TRUE))  #this controls aspects of the grid search
 
-rf_tune_results %>% collect_metrics() %>% View
+# 7. Identify the best model from cross-validation
+collect_metrics(rf_tune_results) %>% View
+select_best(rf_tune_results, metric = "accuracy")
 
-# 6. Finalize the workflow and extract the best hyperparameter values
-param_final <- rf_tune_results %>% 
-  select_best(metric = "accuracy")
+# 8. Look for patterns in the misclassified examples (for the best model)
+collect_predictions(rf_tune_results) %>% View
 
-# 7. Feed them into a final workflow
-rf_workflow.v2 <- rf_workflow.v2 %>% 
-  finalize_workflow(param_final)
+collect_predictions(rf_tune_results) %>% 
+  filter(sex!=.pred_class) %>%                # only look at examples that were misclassified
+  filter(mtry==5, min_n==5) %>%               # this was the best model
+  View
 
-# 8. Train the final model
+bestMod_CVpreds <- 
+  collect_predictions(rf_tune_results) %>% 
+  filter(mtry==5, min_n==5) %>%                          # this was the best model
+  select(.row, .pred_class, .pred_female, .pred_male)    # select columns we want to merge with the original dataset
+
+bestMod_CVpreds <- bind_cols(bestMod_CVpreds, penguin_train[bestMod_CVpreds$.row,])
+
+# We're misclassifying more Adelie penguins than Chinstrap or Gentoo
+num_misclassified_by_species <-
+  bestMod_CVpreds %>% 
+  filter(.pred_class!=sex) %>% 
+  group_by(species) %>% 
+  summarise(n_misclassified = n()) %>% 
+  select(n_misclassified) %>% 
+  unlist
+
+num_of_each_species <- table(penguin_train$species)
+
+num_misclassified_by_species/num_of_each_species
+
+bestMod_CVpreds %>% 
+  ggplot(aes(x=body_mass_g, y=bill_depth_mm, color=sex, fill=.pred_class))+
+  geom_point(pch=21)+
+  facet_wrap(~species)
+
+bestMod_CVpreds %>% 
+  ggplot(aes(x=bill_length_mm, y=bill_depth_mm, color=sex, fill=.pred_class))+
+  geom_point(pch=21)+
+  facet_wrap(~species)
+
+# 9. Inspect confusion matrix on CV set for best model
+conf_mat(data=bestMod_CVpreds,
+         truth=sex, 
+         estimate=.pred_class)
+
+resampled_conf_matrix_from_CV <- 
+  conf_mat_resampled(
+    x=rf_tune_results, 
+    parameters=select_best(rf_tune_results, metric = "accuracy")
+  )
+
+resampled_conf_matrix_from_CV %>% 
+  pivot_wider(names_from='Truth', values_from='Freq')
+
+# 10. Make plots to look for patterns in misclassified examples
+
+# m vs FL
+a <- bestMod_CVpreds %>% 
+  filter(species=="Adelie") %>% 
+  ggplot(aes(x=body_mass_g, y=flipper_length_mm))+
+  geom_point(pch=21, aes(fill=sex, color=.pred_class), size=2)
+
+# m vs BD
+b <- cbind(penguin_train, training_preds) %>% 
+  filter(species=="Adelie") %>% 
+  ggplot(aes(x=body_mass_g, y=bill_depth_mm))+
+  geom_point(pch=21, aes(fill=sex, color=.pred_class), size=2)
+
+# m vs BL
+c <- cbind(penguin_train, training_preds) %>% 
+  filter(species=="Adelie") %>% 
+  ggplot(aes(x=body_mass_g, y=bill_length_mm))+
+  geom_point(pch=21, aes(fill=sex, color=.pred_class), size=2)
+
+# FL vs BD
+d <- cbind(penguin_train, training_preds) %>% 
+  filter(species=="Adelie") %>% 
+  ggplot(aes(x=bill_depth_mm, y=flipper_length_mm))+
+  geom_point(pch=21, aes(fill=sex, color=.pred_class), size=2)
+
+# FL vs BL
+e <- cbind(penguin_train, training_preds) %>% 
+  filter(species=="Adelie") %>% 
+  ggplot(aes(x=bill_length_mm, y=flipper_length_mm))+
+  geom_point(pch=21, aes(fill=sex, color=.pred_class), size=2)
+
+# BD vs BL
+f <- cbind(penguin_train, training_preds) %>% 
+  filter(species=="Adelie") %>% 
+  ggplot(aes(x=bill_depth_mm, y=bill_length_mm))+
+  geom_point(pch=21, aes(fill=sex, color=.pred_class), size=2)
+
+grid.arrange(a,b,c,d,e,f, ncol=2)
+
+# 11. Check learning curves
+set.seed(2468)
+LC_data <- learning_curves_data(penguin_cv, 20, 10, penguin_train, rf_workflow.v2)
+plot_learning_curves(LC_data)
+
+
+# 12. Make additional improvements (feature engineering, new model specification, 
+#     different hyperparameters, etc.)
+# .
+# .
+# .
+
+# 13. Finalize the workflow and extract the best hyperparameter values
+param_final <- select_best(rf_tune_results, metric = "accuracy")
+
+# 14. Feed them into a final workflow
+rf_workflow.v2 <-  finalize_workflow(rf_workflow.v2, param_final)
+
+# 15. Train the final model
+set.seed(54321)
 rf_fit <- fit(rf_workflow.v2, penguin_train)
 
-# 9. Evaluate the confusion matrix
-training_preds <- predict(rf_fit, penguin_train)
-
-bind_cols(training_preds, penguin_train) %>% 
-  conf_mat(truth = sex, estimate = .pred_class)
-
-# 10. Look for patterns in the incorrect predictions
-cbind(penguin_train, training_preds) %>% 
-  filter(sex!=.pred_class)
-
-# 11. Store the test predictions
+# 16. Store the test predictions
 rf_test_preds2 <- predict(rf_fit, penguin_test)
 
-# 12. Evaluate the model's accuracy on the test set
-bind_cols(penguin_test, rf_test_preds2) %>% 
+# 17. Evaluate the model's accuracy on the test set
+rf_test_preds2 %>% 
+  bind_cols(penguin_test) %>% 
   metrics(truth = sex, estimate = .pred_class)
 
+bind_cols(rf_test_preds2, penguin_test) %>% 
+  conf_mat(truth = sex, estimate = .pred_class)
 
 
 
@@ -214,4 +395,47 @@ bind_cols(penguin_test, rf_test_preds2) %>%
 
 
 
+
+
+
+###################################
+## Functions for learning curves ##
+###################################
+
+learning_curves_data <- function(cv_folds, num_breaks, num_folds, training_df, wf){
+  remove_random <- function(split, prop) {
+    if (prop >= 1) {
+      return(split$in_id)
+    }
+    l <- length(split$in_id)
+    p <- round(l * (1 - prop))
+    split$in_id[-sample(1:l, p)]
+  }
+  
+  cv_folds %>%
+    crossing(prop = c(seq(1/num_breaks, 1, by=1/num_breaks))) %>%
+    mutate(analysis = map2(splits, prop, remove_random),
+           assessment = map(splits, complement),
+           splits = map2(analysis, 
+                         assessment, 
+                         ~make_splits(list(analysis = .x, assessment = .y), 
+                                      training_df))) %>%
+    select(prop, splits) %>%
+    nest(learning_splits = c(splits)) %>%
+    mutate(learning_splits = map(learning_splits, manual_rset, paste0("LearningFold", 1:num_folds))) %>% 
+    mutate(res = map(learning_splits, ~fit_resamples(wf, .)),
+           metrics = map(res, collect_metrics)) %>%
+    unnest(metrics)
+}
+plot_learning_curves <- function(learning_curve_dataset){
+  learning_curve_dataset %>%
+    ggplot(aes(prop, mean, color = .metric)) +
+    geom_ribbon(aes(ymin = mean - std_err,
+                    ymax = mean + std_err), alpha = 0.3, color = NA) +
+    geom_line(alpha = 0.8) +
+    geom_point(size = 2) +
+    facet_wrap(~.metric, ncol = 1, scales = "free_y") +
+    theme(legend.position = "none") +
+    labs(y = NULL)
+}
 
