@@ -237,7 +237,7 @@ rf_spec_with_tuning <-
   rand_forest(
     trees=tune(),
     mtry=tune(),
-    min_n=tune()) %>%
+    min_n=tune()) %>% # min num of observations that have to be left to consider another split
   set_engine("ranger", 
              importance="impurity") %>% 
   set_mode("classification") 
@@ -254,6 +254,8 @@ rf_workflow.v2 <- workflow() %>%
   add_model(rf_spec_with_tuning)
 
 # 5. Store the hyperparameter search space (a search "grid")
+expand.grid(1:3, LETTERS[1:3]) # gives every combo of 1,2,3 and a,b,c (just an example of what expand.grid does)
+
 rf_grid <- expand.grid(trees = c(500),
                        mtry  = c(3, 4, 5),
                        min_n = c(5, 10))
@@ -359,26 +361,22 @@ e
 f
 grid.arrange(a,b,c,d,e,f, ncol=2)
 
-# 11. Check learning curves
-rf_spec_with_tuning <- 
-  rand_forest(
-    trees=tune(),
-    mtry=tune(),
-    min_n=tune()) %>%
-  set_engine("ranger", 
-             importance="impurity") %>% 
-  set_mode("classification") 
+# 11. Check learning curves (NOTE: before running this code, store the functions at line 422)
+rf_spec_for_LC <- 
+  rand_forest(mtry=3, trees=500, min_n=5) %>%         # these were the best, tuned hyperparameters 
+  set_engine("ranger", importance="impurity") %>% 
+  set_mode("classification")
 
 penguins_recipe <- 
   recipe(sex ~ species + bill_length_mm + bill_depth_mm + flipper_length_mm + body_mass_g, 
          data = penguin_train)
 
-rf_workflow.v2 <- workflow() %>% 
+rf_workflow.LC <- workflow() %>% 
   add_recipe(penguins_recipe) %>% 
-  add_model(rf_spec_with_tuning)
+  add_model(rf_spec_for_LC)
 
 set.seed(2468)
-LC_data <- learning_curves_data(penguin_cv, 20, 10, penguin_train, rf_workflow.v2)
+LC_data <- learning_curves_data(penguin_cv, 20, 10, penguin_df, rf_workflow.LC)
 plot_learning_curves(LC_data)
 
 
@@ -396,14 +394,18 @@ rf_workflow.v2 <-  finalize_workflow(rf_workflow.v2, param_final)
 
 # 15. Train the final model
 set.seed(54321)
-rf_fit <- fit(rf_workflow.v2, penguin_train)
+final_rf_fit <- fit(rf_workflow.v2, penguin_train)
 
-# 16. Store the test predictions
-rf_test_preds2 <- predict(rf_fit, penguin_test)
+# 16. Inspect variable importance of the final model trained on all of the training data
+final_rf_fit %>% 
+  extract_fit_parsnip %>% 
+  vip
 
-# 17. Evaluate the model's accuracy on the test set
-rf_test_preds2 %>% 
-  bind_cols(penguin_test) %>% 
+# 17. Store the test predictions
+rf_test_preds2 <- predict(final_rf_fit, penguin_test)
+
+# 18. Evaluate the model's accuracy on the test set
+bind_cols(rf_test_preds2, penguin_test) %>% 
   metrics(truth = sex, estimate = .pred_class)
 
 bind_cols(rf_test_preds2, penguin_test) %>% 
@@ -417,10 +419,11 @@ bind_cols(rf_test_preds2, penguin_test) %>%
 
 
 
-
 ###################################
 ## Functions for learning curves ##
 ###################################
+
+# These functions are adapted from https://github.com/tidymodels/rsample/issues/166
 
 remove_random <- function(split, prop) {
   if (prop >= 1) {
@@ -434,15 +437,15 @@ remove_random <- function(split, prop) {
 learning_curves_data <- function(cv_folds, num_breaks, num_folds, training_df, wf){
   cv_folds %>%
     crossing(prop = c(seq(1/num_breaks, 1, by=1/num_breaks))) %>%
-    mutate(analysis = map2(splits, prop, remove_random),
-           assessment = map(splits, complement),
-           splits = map2(analysis, 
-                         assessment, 
-                         ~make_splits(list(analysis = .x, assessment = .y), 
-                                      training_df))) %>%
+    mutate(analysis = purrr::map2(splits, prop, remove_random),
+           assessment = purrr::map(splits, complement),
+           splits = purrr::map2(analysis, 
+                                assessment, 
+                                ~make_splits(list(analysis = .x, assessment = .y), 
+                                             training_df))) %>%
     select(prop, splits) %>%
     nest(learning_splits = c(splits)) %>%
-    mutate(learning_splits = map(learning_splits, manual_rset, paste0("LearningFold", 1:num_folds))) %>% 
+    mutate(learning_splits = purrr::map(learning_splits, manual_rset, paste0("LearningFold", 1:num_folds))) %>% 
     mutate(res = map(learning_splits, ~fit_resamples(wf, .)),
            metrics = map(res, collect_metrics)) %>%
     unnest(metrics)
@@ -459,4 +462,5 @@ plot_learning_curves <- function(learning_curve_dataset){
     theme(legend.position = "none") +
     labs(y = NULL)
 }
+
 
