@@ -18,19 +18,23 @@ remove(list=ls())
 # ========================== #
 # == Exploratory Analysis == #
 # ========================== #
-
+penguins
 # Inspect data
-summary()
+summary(penguins)
 head()
 
 # Visualize relationships
-ggplot()+
-  geom_point()
-
+penguins %>% 
+  filter(!is.na(sex)) %>% 
+  ggplot(aes(x = flipper_length_mm, y = bill_length_mm, color = sex))+
+  geom_point() +
+  facet_wrap(~species)
 
 
 # Feature selection: choose the variables we want to include
-
+penguins_df <- penguins %>% 
+  filter(!is.na(sex)) %>% 
+  select(-year, -island)
 
 
 # ============================================= #
@@ -38,12 +42,12 @@ ggplot()+
 # ============================================= #
 
 # Set the random seed for reproducibility
-set.seed()
+set.seed(1234)
 
 # Split the observations into train & test sets
-initial_split()
-training()
-testing()
+penguin_split <- initial_split(penguins_df, prop = 0.75)
+penguin_training <- training(penguin_split)
+penguin_test <- testing(penguin_split)
 
 # At this point, we should have 2 datasets: train and test
 nrow()
@@ -52,10 +56,10 @@ nrow()
 
 
 # Store the model specifications, just using default hyper-parameter values
-
+rf_spec <- 
   rand_forest() %>%
-  set_engine() %>%
-  set_mode()
+  set_engine("ranger") %>%
+  set_mode("classification")
 
   nearest_neighbor() %>%   
   set_engine() %>%                
