@@ -1,0 +1,227 @@
+---
+title: "Intro to GIS using R"
+output: html_document
+date: "2023-04-14"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, echo=FALSE}
+# load packages
+library(sf) # for geospatial analysis
+library(tidyverse) # for all things data wrangling
+library(tigris) # for downloading administrative boundary shapefiles
+library(ggthemes) # for the extra map theme
+library(here) # use to make file paths much easier and more reproducible
+library(measurements) # use for converting measurements
+library(leaflet) # for an interactive map
+library(htmlwidgets) # for saving out interactive map
+```
+
+## Learn how to use basic sf functions and create both static and interactive maps!
+
+
+### **Data Sources:**
+
+- [Sonoma County Schools](https://gis-sonomacounty.hub.arcgis.com/datasets/sonomacounty::schools-1/about)
+- [Sonoma County Regional Parks](https://gis-sonomacounty.hub.arcgis.com/datasets/sonomacounty::regional-parks-boundaries/about)
+
+
+### Read in our data:
+
+```{r, echo=FALSE}
+# Path to raw data folder
+raw_data <- here("intro_gis_r/data/raw/")
+
+# read in our shapefiles
+schools <- sf::read_sf(file.path(raw_data, "soco_schools/FAC_SCHL.shp"))
+parks <- sf::read_sf(file.path(raw_data, "soco_parks/BND_PRK.shp"))
+
+# Get administrative boundaries using the tigris package
+  # Never search for a state/county/census boundary shapefile online ever again!!
+us_states <- tigris::states(cb = TRUE) # cb = TRUE downloads the 500k resolution version
+ca_counties <- tigris::counties(state = "CA", cb = TRUE)
+```
+
+### Look at our data:
+
+```{r, echo=FALSE}
+# attribute data
+view(us_states)
+```
+
+```{r}
+# Map US states and CA counties
+ggplot() +
+  geom_sf(data = us_states) +
+  geom_sf(data = ca_counties, color = "red") 
+ # geom_sf(data = ca_counties, aes(color = NAME), show.legend = FALSE) + # color the outlines of counties by their name
+#  geom_sf(data = ca_counties, aes(fill = ALAND)) + # color the fill of counties by the area of land they cover
+  # coord_sf(xlim = c(-125, -65), ylim = c(23,50)) +
+  # theme_map()
+```
+
+```{r, echo=FALSE}
+view(schools)
+```
+
+```{r}
+# Map location of schools in Sonoma County
+ggplot() +
+  geom_sf(data = ca_counties) +
+  geom_sf(data = schools, color = "red") +
+#  geom_sf(data = schools, aes(color = PublicSchl)) +
+  coord_sf(xlim = c(-123.5,-122.2), ylim = c(38,39)) +
+  # labs(
+  #   color = "Public School"
+  # ) +
+  theme_map()
+```
+
+```{r}
+# Let's make a quick basemap
+soco_basemap <- ggplot() +
+  geom_sf(data = ca_counties, fill = "grey95") +
+  geom_sf(data = ca_counties %>% filter(NAME == "Sonoma"), fill = "grey85")
+
+soco_basemap +
+  coord_sf(xlim = c(-123.5,-122.2), ylim = c(38,39)) +
+  theme_map()
+```
+
+
+```{r, echo=FALSE}
+view(parks)
+```
+
+```{r}
+# Map location of parks in Sonoma County
+soco_basemap +
+  geom_sf(data = parks, fill = "green", color = "darkgreen") +
+  coord_sf(xlim = c(-123.5,-122.2), ylim = c(38,39)) +
+  theme_map()
+
+```
+
+## TASK: Find out which scools are within a 1 mi radius of regional parks
+
+1. Make sure all Coordinate Reference Systems (CRS) match.
+
+```{r}
+# Let's check what the CRS looks like. Note the EPSG code, and the unit of measurement
+st_crs(parks)
+```
+
+```{r}
+# now let's see if they match
+st_crs(parks) == st_crs(schools)
+```
+```{r}
+# Those match but let's transform the county shapefile to match
+ca_counties_crs <- sf::st_transform(ca_counties, st_crs(parks))
+
+# check if it worked
+st_crs(parks) == st_crs(ca_counties_crs)
+```
+
+
+2. Buffer the parks shapefile by 1 mi
+
+```{r, echo=FALSE}
+# get the number of ft in a mile
+ft_1mi <- measurements::conv_unit(1, "mi", "ft")
+  
+# buffer
+parks_buffer <- st_buffer(parks, ft_1mi)
+```
+
+```{r}
+# check it worked
+soco_basemap +
+  geom_sf(data = parks_buffer, fill = "blue") + # 1 mile buffer
+  geom_sf(data = parks, color = "green", fill = "green") + # original parks shapefile 
+  coord_sf(xlim = c(-123.5,-122.2), ylim = c(38,39)) +
+  theme_map()
+```
+
+3. Intersect the buffer with schools
+
+```{r}
+schools_1mi_parks <- st_intersection(schools, parks_buffer)
+```
+
+```{r}
+# check this worked
+soco_basemap +
+  geom_sf(data = parks_buffer, fill = "blue") +
+  geom_sf(data = schools_1mi_parks, color = "yellow") +
+  coord_sf(xlim = c(-123.5,-122.2), ylim = c(38,39)) +
+  theme_map()
+```
+
+5. Map our results
+
+```{r}
+final_map <- soco_basemap +
+ # geom_sf(data = parks, fill = "dark green") +
+  geom_sf(data = schools_1mi_parks, aes(fill = PublicSchl), shape = 24, size = 2) +
+  scale_fill_manual(values = c("orange2", "purple")) +
+  labs(
+    color = "Public School"
+  ) +
+  coord_sf(xlim = c(-123.5,-122.3), ylim = c(38.13,38.85)) +
+  theme_map()
+
+final_map
+```
+
+```{r, include = FALSE}
+# # save our map
+# ggsave(filename = "schls_parks.png", plot = final_map, 
+#        path = here("output"), dpi = 350)
+```
+
+Optional - Functionize!
+
+```{r}
+# Create a function to easily replicate our workflow above
+process_shps = function(shp_int, shp_buff, buffer_dist){
+  
+  # Make sure the CRS matches
+  shp_int <- st_transform(shp_int, st_crs(shp_buff))
+  
+  # Buffer 
+  shp_buff <- st_buffer(shp_buff, buffer_dist)
+  
+  # Intersect
+  shp_final <- st_intersection(shp_int, shp_buff)
+  
+  return(shp_final)
+}
+```
+
+```{r}
+schls_parks_6000ft <- process_shps(schools, parks, 6000)
+```
+
+Optional - Interactive Map using Leaflet 
+
+Check out their [documentation](https://rstudio.github.io/leaflet/)
+
+```{r}
+# Make a quick interactive map
+m <- leaflet(data = schls_parks_6000ft) %>% 
+ # addTiles() %>% 
+  addProviderTiles(providers$CartoDB.Positron) %>% 
+  addMarkers(~Long, ~Lat, popup = ~School)
+
+m
+```
+
+```{r, include = FALSE}
+# let's save the map to share with coworkers
+# saveWidget(m, file="schls_interactive.html")
+```
+
