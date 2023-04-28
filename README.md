@@ -5,3 +5,4 @@
 #### **Training Materials:**
 - `intro_machine_learning/`: Training by Daniel McGeeney on 2022-07-28
 - `py_climate_gridded_data/`: Training by Max Vilgalys on 2023-03-02
+- `intro_gis_r/`: Training by AnnaClaire Marley on 2023-04-28
