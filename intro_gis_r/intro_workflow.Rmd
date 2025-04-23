@@ -56,11 +56,11 @@ view(us_states)
 # Map US states and CA counties
 ggplot() +
   geom_sf(data = us_states) +
-  geom_sf(data = ca_counties, color = "red") 
+ # geom_sf(data = ca_counties, color = "red") +
  # geom_sf(data = ca_counties, aes(color = NAME), show.legend = FALSE) + # color the outlines of counties by their name
-#  geom_sf(data = ca_counties, aes(fill = ALAND)) + # color the fill of counties by the area of land they cover
-  # coord_sf(xlim = c(-125, -65), ylim = c(23,50)) +
-  # theme_map()
+ geom_sf(data = ca_counties, aes(fill = ALAND)) + # color the fill of counties by the area of land they cover
+  coord_sf(xlim = c(-125, -65), ylim = c(23,50)) +
+  theme_map()
 ```
 
 ```{r, echo=FALSE}
@@ -71,12 +71,12 @@ view(schools)
 # Map location of schools in Sonoma County
 ggplot() +
   geom_sf(data = ca_counties) +
-  geom_sf(data = schools, color = "red") +
-#  geom_sf(data = schools, aes(color = PublicSchl)) +
+#  geom_sf(data = schools, color = "red") +
+  geom_sf(data = schools, aes(color = PublicSchl)) +
   coord_sf(xlim = c(-123.5,-122.2), ylim = c(38,39)) +
-  # labs(
-  #   color = "Public School"
-  # ) +
+   labs(
+     color = "Public School"
+   ) +
   theme_map()
 ```
 
@@ -179,8 +179,9 @@ final_map
 
 ```{r, include = FALSE}
 # # save our map
-# ggsave(filename = "schls_parks.png", plot = final_map, 
-#        path = here("output"), dpi = 350)
+ ggsave(filename = "schls_parks.png", plot = final_map, 
+        path = "C:/Users/PMcKibben/OneDrive - Eastern Research Group/github/erg_data_science_training_acforks", dpi = 350)
+# line 183, code often doesn't like the "here" function
 ```
 
 Optional - Functionize!
@@ -189,7 +190,7 @@ Optional - Functionize!
 # Create a function to easily replicate our workflow above
 process_shps = function(shp_int, shp_buff, buffer_dist){
   
-  # Make sure the CRS matches
+  # Make sure the CRS matches <-THIS IS VERY IMPORTANT IN ANY GIS ANALYSIS
   shp_int <- st_transform(shp_int, st_crs(shp_buff))
   
   # Buffer 
@@ -203,7 +204,7 @@ process_shps = function(shp_int, shp_buff, buffer_dist){
 ```
 
 ```{r}
-schls_parks_6000ft <- process_shps(schools, parks, 6000)
+schls_parks_6000ft <- process_shps(schools, parks, 6000) #schools main thing we're intercepting, parks is the buffer, 6000 is the ft buffered
 ```
 
 Optional - Interactive Map using Leaflet 
@@ -213,15 +214,15 @@ Check out their [documentation](https://rstudio.github.io/leaflet/)
 ```{r}
 # Make a quick interactive map
 m <- leaflet(data = schls_parks_6000ft) %>% 
- # addTiles() %>% 
-  addProviderTiles(providers$CartoDB.Positron) %>% 
-  addMarkers(~Long, ~Lat, popup = ~School)
+ # addTiles() %>% if you only use the code in this line, it will use leaflet's base map
+  addProviderTiles(providers$CartoDB.Positron) %>% #adds a diferent base map
+  addMarkers(~Long, ~Lat, popup = ~School) #controls what you see when you click on markers
 
 m
 ```
 
 ```{r, include = FALSE}
 # let's save the map to share with coworkers
-# saveWidget(m, file="schls_interactive.html")
+ saveWidget(m, file="schls_interactive.html")
 ```
 
